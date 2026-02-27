@@ -1145,6 +1145,32 @@ pub fn handleMessage(self: *Surface, msg: Message) !void {
                 .{ .selected = v },
             );
         },
+
+        .open_url => |req| {
+            const base64_url = req.data();
+            defer req.deinit(self.alloc);
+
+            // Decode the base64 URL
+            const decoded = std.base64.standard.Decoder.calcSizeForSlice(base64_url) catch {
+                log.warn("invalid base64 in OSC 1337 OpenURL", .{});
+                return;
+            };
+            const url_buf = self.alloc.alloc(u8, decoded) catch {
+                log.warn("failed to allocate buffer for URL decoding", .{});
+                return;
+            };
+            defer self.alloc.free(url_buf);
+
+            const url = std.base64.standard.Decoder.decode(url_buf, base64_url) catch {
+                log.warn("failed to decode base64 URL in OSC 1337 OpenURL", .{});
+                return;
+            };
+
+            log.info("OSC 1337 OpenURL: {s}", .{url});
+
+            // Open the URL using our existing infrastructure
+            try self.openUrl(.{ .kind = .unknown, .url = url });
+        },
     }
 }
 

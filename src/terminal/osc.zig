@@ -155,6 +155,12 @@ pub const Command = union(Key) {
 
     kitty_clipboard_protocol: KittyClipboardProtocol,
 
+    /// iTerm2 OSC 1337 OpenURL - open a URL using the system handler
+    /// The URL is base64 encoded in the escape sequence
+    open_url: struct {
+        url: [:0]const u8,
+    },
+
     pub const SemanticPrompt = parsers.semantic_prompt.Command;
 
     pub const KittyClipboardProtocol = parsers.kitty_clipboard_protocol.OSC;
@@ -187,6 +193,7 @@ pub const Command = union(Key) {
             "conemu_comment",
             "kitty_text_sizing",
             "kitty_clipboard_protocol",
+            "open_url",
         },
     );
 
@@ -411,6 +418,7 @@ pub const Parser = struct {
             .show_desktop_notification,
             .kitty_text_sizing,
             .kitty_clipboard_protocol,
+            .open_url,
             => {},
         }
 

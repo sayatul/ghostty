@@ -320,6 +320,7 @@ pub const StreamHandler = struct {
             .progress_report => self.progressReport(value),
             .start_hyperlink => try self.startHyperlink(value.uri, value.id),
             .clipboard_contents => try self.clipboardContents(value.kind, value.data),
+            .open_url => try self.openUrl(value.url),
             .semantic_prompt => try self.semanticPrompt(value),
             .mouse_shape => try self.setMouseShape(value),
             .configure_charset => self.configureCharset(value.slot, value.charset),
@@ -1440,6 +1441,19 @@ pub const StreamHandler = struct {
         message.desktop_notification.body[body_len] = 0;
 
         self.surfaceMessageWriter(message);
+    }
+
+    /// Handle OSC 1337 OpenURL - open a URL in the system handler.
+    /// The URL is base64-encoded.
+    fn openUrl(self: *StreamHandler, base64_url: []const u8) !void {
+        // Send the base64-encoded URL to the surface for processing.
+        // The surface will decode it and open it.
+        const req = try apprt.surface.Message.WriteReq.init(self.alloc, base64_url);
+        switch (req) {
+            .small => |v| self.surfaceMessageWriter(.{ .open_url = .{ .small = v } }),
+            .stable => unreachable,
+            .alloc => |v| self.surfaceMessageWriter(.{ .open_url = .{ .alloc = v } }),
+        }
     }
 
     /// Send a report to the pty.
