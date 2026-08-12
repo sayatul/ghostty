@@ -1,0 +1,198 @@
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+name: Fork macOS DMG
+
+# Only one build at a time. A newer push supersedes an in-flight build.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos-dmg:
+    # Fork-only. Upstream has its own signed + notarized release pipeline
+    # (release-tip.yml) and should never run this.
+    if: github.repository_owner != 'ghostty-org'
+
+    # GitHub-hosted arm64 runner. Ghostty main requires Xcode 26 and the
+    # macOS 26 SDK; the macos-26 image ships 26.6 as its default.
+    runs-on: macos-26
+    timeout-minutes: 120
+
+    env:
+      ZIG_LOCAL_CACHE_DIR: /Users/runner/zig/local-cache
+      ZIG_GLOBAL_CACHE_DIR: /Users/runner/zig/global-cache
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Important so that build number generation works
+          fetch-depth: 0
+
+      - name: Setup Cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /Users/runner/zig
+          key: zig-macos-${{ hashFiles('build.zig.zon') }}-${{ github.sha }}
+          restore-keys: |
+            zig-macos-${{ hashFiles('build.zig.zon') }}-
+            zig-macos-
+
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          determinate: true
+
+      # Read-only. Public cache, so no auth token is needed in a fork.
+      - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
+        with:
+          name: ghostty
+          skipPush: true
+
+      # Pinned to match upstream CI. Falls back to the image default (also a
+      # 26.x) if this exact version is ever dropped from the runner image.
+      - name: Xcode Select
+        run: |
+          if [ -d /Applications/Xcode_26.6.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.6.app
+          fi
+          xcodebuild -version
+
+      - name: Extract build info
+        id: build_info
+        run: |
+          echo "build=$(git rev-list --count HEAD)" >> $GITHUB_OUTPUT
+          echo "commit=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Get the Zig deps
+        id: deps
+        run: nix build -L .#deps && echo "deps=$(readlink ./result)" >> $GITHUB_OUTPUT
+
+      # GhosttyKit is the framework that is built from Zig for our native
+      # Mac app to access. Build this in release mode.
+      - name: Build GhosttyKit
+        run: |
+          nix develop -c zig build \
+            --system ${{ steps.deps.outputs.deps }} \
+            -Doptimize=ReleaseFast \
+            -Demit-macos-app=false
+
+      # The native app is built with native Xcode tooling. IMPORTANT: this must
+      # NOT run in a Nix environment. Nix breaks xcodebuild so this has to be
+      # run outside. The Xcode project ad-hoc signs (CODE_SIGN_IDENTITY "-"),
+      # which needs no Apple certificate.
+      - name: Build Ghostty.app
+        run: |
+          cd macos
+          xcodebuild -target Ghostty -configuration Release
+
+      # We inject the "build number" as simply the number of commits since HEAD.
+      # This will be a monotonically always increasing build number that we use.
+      - name: Update Info.plist
+        env:
+          GHOSTTY_BUILD: ${{ steps.build_info.outputs.build }}
+          GHOSTTY_COMMIT: ${{ steps.build_info.outputs.commit }}
+        run: |
+          PLIST="macos/build/Release/Ghostty.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :GhosttyCommit $GHOSTTY_COMMIT" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $GHOSTTY_BUILD" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $GHOSTTY_COMMIT" "$PLIST"
+
+      # Editing Info.plist invalidates the seal Xcode created, and the app is
+      # built with hardened runtime, so macOS refuses to launch it. Re-sign
+      # ad-hoc. Only the outer bundle needs it; the nested Sparkle framework
+      # and DockTilePlugin signatures were not touched.
+      - name: Re-codesign app bundle
+        run: |
+          # Ad-hoc signatures carry no Team ID, and hardened runtime enforces
+          # library validation, which then refuses to load Sparkle.framework
+          # ("different Team IDs"). Apple's documented opt-out is added to a
+          # copy so the app's real entitlements stay untouched; upstream signs
+          # with a Developer ID and does not need this.
+          ADHOC_ENTITLEMENTS="$RUNNER_TEMP/adhoc.entitlements"
+          cp macos/Ghostty.entitlements "$ADHOC_ENTITLEMENTS"
+          /usr/libexec/PlistBuddy -c \
+            "Add :com.apple.security.cs.disable-library-validation bool true" \
+            "$ADHOC_ENTITLEMENTS"
+
+          /usr/bin/codesign --force --sign - \
+            --options runtime \
+            --entitlements "$ADHOC_ENTITLEMENTS" \
+            macos/build/Release/Ghostty.app
+
+      # Fail the build here rather than shipping a DMG that cannot launch.
+      - name: Verify signature
+        run: |
+          codesign --verify --strict --verbose=2 macos/build/Release/Ghostty.app
+          codesign --display --verbose=2 macos/build/Release/Ghostty.app
+
+      # hdiutil is built in, so this needs no signing identity and no extra
+      # tooling. The result is an ad-hoc signed, un-notarized DMG.
+      - name: Create DMG
+        run: |
+          mkdir -p dmg
+          ditto macos/build/Release/Ghostty.app dmg/Ghostty.app
+          ln -s /Applications dmg/Applications
+          hdiutil create \
+            -volname Ghostty \
+            -srcfolder dmg \
+            -ov -format UDZO \
+            Ghostty.dmg
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Ghostty-${{ steps.build_info.outputs.commit }}-dmg
+          path: Ghostty.dmg
+          if-no-files-found: error
+          retention-days: 30
+
+      # Reproduce what a user does: mount the DMG, copy the app out, run it.
+      # A bundle that cannot launch should fail here rather than on someone's
+      # Mac. Diagnostics print unconditionally so a failure explains itself.
+      - name: Smoke test the DMG
+        run: |
+          hdiutil attach Ghostty.dmg -mountpoint /Volumes/GhosttySmoke -nobrowse
+          ditto /Volumes/GhosttySmoke/Ghostty.app "$RUNNER_TEMP/Ghostty.app"
+          hdiutil detach /Volumes/GhosttySmoke
+          APP="$RUNNER_TEMP/Ghostty.app"
+
+          echo "=== architectures ==="
+          file "$APP/Contents/MacOS/ghostty"
+          lipo -info "$APP/Contents/MacOS/ghostty" || true
+
+          echo "=== minimum OS ==="
+          otool -l "$APP/Contents/MacOS/ghostty" | grep -A4 LC_BUILD_VERSION | head -20
+
+          echo "=== linked libraries ==="
+          otool -L "$APP/Contents/MacOS/ghostty" | head -30
+
+          echo "=== signature ==="
+          codesign --verify --deep --strict --verbose=2 "$APP" || true
+          codesign --display --entitlements - "$APP" || true
+
+          echo "=== launch ==="
+          "$APP/Contents/MacOS/ghostty" +version
+
+      # The DMG is ad-hoc signed and not notarized, so Gatekeeper will refuse
+      # to open it until the quarantine attribute is removed.
+      - name: Install instructions
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" << 'EOF'
+          ## Ghostty.dmg
+
+          Build `${{ steps.build_info.outputs.build }}` from commit `${{ steps.build_info.outputs.commit }}`.
+
+          Download the artifact below, then drag Ghostty into Applications.
+          This build is ad-hoc signed and **not** notarized, so macOS will
+          refuse to open it until you clear the quarantine flag:
+
+          ```sh
+          xattr -dr com.apple.quarantine /Applications/Ghostty.app
+          ```
+          EOF
