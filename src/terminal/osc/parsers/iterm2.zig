@@ -154,6 +154,42 @@ pub fn parse(parser: *Parser, _: ?u8) ?*Command {
             return &parser.command;
         },
 
+        .OpenURL => {
+            var value = value_ orelse {
+                parser.command = .invalid;
+                return null;
+            };
+
+            // Value must be non-empty
+            if (value.len == 0) {
+                parser.command = .invalid;
+                return null;
+            }
+
+            // base64 value must be prefixed by a colon (same as Copy)
+            if (value[0] != ':') {
+                parser.command = .invalid;
+                return null;
+            }
+
+            value = value[1..value.len :0];
+
+            // Value must be non-empty after stripping the colon
+            if (value.len == 0) {
+                parser.command = .invalid;
+                return null;
+            }
+
+            // The value is a base64-encoded URL. We pass the base64 data
+            // through and let the handler decode it.
+            parser.command = .{
+                .open_url = .{
+                    .url = value,
+                },
+            };
+            return &parser.command;
+        },
+
         .AddAnnotation,
         .AddHiddenAnnotation,
         .Block,
@@ -170,7 +206,6 @@ pub fn parse(parser: *Parser, _: ?u8) ?*Command {
         .FilePart,
         .HighlightCursorLine,
         .MultipartFile,
-        .OpenURL,
         .PopKeyLabels,
         .PushKeyLabels,
         .RemoteHost,
@@ -432,4 +467,68 @@ test "OSC: 1337: test CurrentDir with non-empty value" {
     const cmd = p.end('\x1b').?.*;
     try testing.expect(cmd == .report_pwd);
     try testing.expectEqualStrings("abc123", cmd.report_pwd.value);
+}
+
+test "OSC: 1337: test OpenURL with no value" {
+    const testing = std.testing;
+
+    var p: Parser = .init(testing.allocator);
+    defer p.deinit();
+
+    const input = "1337;OpenURL";
+    for (input) |ch| p.next(ch);
+
+    try testing.expect(p.end('\x1b') == null);
+}
+
+test "OSC: 1337: test OpenURL with empty value" {
+    const testing = std.testing;
+
+    var p: Parser = .init(testing.allocator);
+    defer p.deinit();
+
+    const input = "1337;OpenURL=";
+    for (input) |ch| p.next(ch);
+
+    try testing.expect(p.end('\x1b') == null);
+}
+
+test "OSC: 1337: test OpenURL with only prefix colon" {
+    const testing = std.testing;
+
+    var p: Parser = .init(testing.allocator);
+    defer p.deinit();
+
+    const input = "1337;OpenURL=:";
+    for (input) |ch| p.next(ch);
+
+    try testing.expect(p.end('\x1b') == null);
+}
+
+test "OSC: 1337: test OpenURL without prefix colon" {
+    const testing = std.testing;
+
+    var p: Parser = .init(testing.allocator);
+    defer p.deinit();
+
+    // Base64 for "https://example.com" without the required colon prefix
+    const input = "1337;OpenURL=aHR0cHM6Ly9leGFtcGxlLmNvbQ==";
+    for (input) |ch| p.next(ch);
+
+    try testing.expect(p.end('\x1b') == null);
+}
+
+test "OSC: 1337: test OpenURL with valid base64 URL" {
+    const testing = std.testing;
+
+    var p: Parser = .init(testing.allocator);
+    defer p.deinit();
+
+    // Base64 for "https://example.com" with the required colon prefix
+    const input = "1337;OpenURL=:aHR0cHM6Ly9leGFtcGxlLmNvbQ==";
+    for (input) |ch| p.next(ch);
+
+    const cmd = p.end('\x1b').?.*;
+    try testing.expect(cmd == .open_url);
+    try testing.expectEqualStrings("aHR0cHM6Ly9leGFtcGxlLmNvbQ==", cmd.open_url.url);
 }

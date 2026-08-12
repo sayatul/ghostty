@@ -128,6 +128,7 @@ pub const Action = union(Key) {
     kitty_color_report: kitty.color.OSC,
     color_operation: ColorOperation,
     semantic_prompt: SemanticPrompt,
+    open_url: OpenUrl,
 
     pub const Key = lib.Enum(
         lib.target,
@@ -227,6 +228,7 @@ pub const Action = union(Key) {
             "kitty_color_report",
             "color_operation",
             "semantic_prompt",
+            "open_url",
         },
     );
 
@@ -439,6 +441,17 @@ pub const Action = union(Key) {
     };
 
     pub const SemanticPrompt = osc.Command.SemanticPrompt;
+
+    pub const OpenUrl = struct {
+        /// The base64-encoded URL to open
+        url: []const u8,
+
+        pub const C = lib.String;
+
+        pub fn cval(self: OpenUrl) OpenUrl.C {
+            return .init(self.url);
+        }
+    };
 };
 
 /// Returns a type that can process a stream of tty control characters.
@@ -2468,6 +2481,12 @@ pub fn Stream(comptime H: type) type {
 
                 .conemu_progress_report => |v| {
                     self.handler.vt(.progress_report, v);
+                },
+
+                .open_url => |v| {
+                    self.handler.vt(.open_url, .{
+                        .url = v.url,
+                    });
                 },
 
                 .conemu_sleep,

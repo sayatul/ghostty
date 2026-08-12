@@ -358,6 +358,11 @@ pub const Handler = struct {
             .title_push,
             .title_pop,
             => {},
+
+            // Purely external effect with no `Effects` callback, so this
+            // handler ignores it. OSC 1337 OpenURL is handled by the apprt
+            // stream handler (termio/stream_handler.zig).
+            .open_url => {},
         }
     }
 

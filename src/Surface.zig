@@ -1184,6 +1184,30 @@ pub fn handleMessage(self: *Surface, msg: Message) !void {
                 .{ .selected = v },
             );
         },
+
+        .open_url => |req| {
+            defer req.deinit();
+
+            const base64_url = req.slice();
+            const dec = std.base64.standard.Decoder;
+
+            // Decode the base64 URL.
+            const size = dec.calcSizeForSlice(base64_url) catch {
+                log.info("application sent invalid base64 data for OSC 1337 OpenURL", .{});
+                return;
+            };
+            const url = try self.alloc.alloc(u8, size);
+            defer self.alloc.free(url);
+            dec.decode(url, base64_url) catch {
+                log.info("application sent invalid base64 data for OSC 1337 OpenURL", .{});
+                return;
+            };
+
+            log.info("OSC 1337 OpenURL: {s}", .{url});
+
+            // Open the URL using our existing infrastructure
+            try self.openUrl(.{ .kind = .unknown, .url = url });
+        },
     }
 }
 
