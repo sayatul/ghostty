@@ -130,6 +130,7 @@ pub const Action = union(Key) {
     semantic_prompt: SemanticPrompt,
     kitty_clipboard: KittyClipboard,
     kitty_dnd: KittyDnd,
+    open_url: OpenUrl,
 
     pub const Key = lib.Enum(
         lib.target,
@@ -231,6 +232,7 @@ pub const Action = union(Key) {
             "semantic_prompt",
             "kitty_clipboard",
             "kitty_dnd",
+            "open_url",
         },
     );
 
@@ -453,6 +455,17 @@ pub const Action = union(Key) {
     pub const KittyClipboard = osc.Command.KittyClipboardProtocol;
 
     pub const KittyDnd = osc.Command.KittyDndProtocol;
+
+    pub const OpenUrl = struct {
+        /// The base64-encoded URL to open
+        url: []const u8,
+
+        pub const C = lib.String;
+
+        pub fn cval(self: OpenUrl) OpenUrl.C {
+            return .init(self.url);
+        }
+    };
 };
 
 /// Returns a type that can process a stream of tty control characters.
@@ -2681,6 +2694,12 @@ pub fn Stream(comptime H: type) type {
 
                 .kitty_dnd_protocol => |v| {
                     self.handler.vt(.kitty_dnd, v);
+                },
+
+                .open_url => |v| {
+                    self.handler.vt(.open_url, .{
+                        .url = v.url,
+                    });
                 },
 
                 .conemu_sleep,
