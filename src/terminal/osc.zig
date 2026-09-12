@@ -167,6 +167,13 @@ pub const Command = union(Key) {
     /// Kitty desktop notifications (OSC 99)
     kitty_desktop_notification: KittyDesktopNotification,
 
+    /// iTerm2 OSC 1337 OpenURL - open a URL using the system handler
+    /// The URL is base64 encoded in the escape sequence
+    open_url: struct {
+        url: [:0]const u8,
+    },
+
+
     pub const SemanticPrompt = parsers.semantic_prompt.Command;
 
     pub const KittyClipboardProtocol = parsers.kitty_clipboard_protocol.OSC;
@@ -206,6 +213,7 @@ pub const Command = union(Key) {
             "kitty_dnd_protocol",
             "context_signal",
             "kitty_desktop_notification",
+            "open_url",
         },
     );
 
@@ -454,6 +462,7 @@ pub const Parser = struct {
             .kitty_dnd_protocol,
             .kitty_desktop_notification,
             .context_signal,
+            .open_url,
             => {},
         }
 

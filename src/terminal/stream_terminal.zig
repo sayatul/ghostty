@@ -516,7 +516,10 @@ pub const Handler = struct {
             .dcs_put => try self.dcsPut(value),
             .dcs_unhook => try self.dcsUnhook(),
 
-            // Have no terminal-modifying effect
+            // Have no terminal-modifying effect. Opening a URL is a host-local
+            // side effect handled by the termio stream handler, which forwards
+            // it to the surface; there is nothing for a pure terminal to do.
+            .open_url,
             .title_push,
             .title_pop,
             => {},

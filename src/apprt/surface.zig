@@ -153,6 +153,10 @@ pub const Message = union(enum) {
     /// Selected search index change
     search_selected: ?usize,
 
+    /// Open a URL using the system handler (OSC 1337 OpenURL)
+    /// The URL is base64-encoded.
+    open_url: WriteReq,
+
     pub const ReportTitleStyle = enum {
         csi_21_t,
 
