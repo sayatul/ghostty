@@ -3424,6 +3424,42 @@ keybind: Keybinds = .{},
 /// platforms.
 @"macos-dock-drop-behavior": MacOSDockDropBehavior = .@"new-tab",
 
+/// Upload dropped files to the remote host when the surface is sitting in an
+/// SSH session, and insert the resulting remote path instead of the local one.
+///
+/// Dropping a file on a terminal normally types the local path, which names
+/// nothing on the far side of an SSH connection. With this enabled, Ghostty
+/// copies the file to the remote host with `scp` and inserts the path it
+/// landed at, so whatever is running in the pane can actually open it.
+///
+/// The SSH destination is discovered by walking this surface's own process
+/// tree, so it works for any host and needs nothing installed remotely. It
+/// also works through a multiplexer, because the `ssh` process is local
+/// either way.
+///
+/// This is off by default: it sends file contents over the network as a side
+/// effect of a drag, which should be a deliberate choice.
+///
+/// This setting is only supported on macOS and has no effect on other
+/// platforms.
+@"ssh-drop-upload": bool = false,
+
+/// Destination directory for `ssh-drop-upload`, on the remote host.
+///
+/// When unset, dropped files go to a private per-user directory inside the
+/// remote's temporary directory (`$TMPDIR`, falling back to `/tmp`), created
+/// with mode 0700. The system temp directory is usually world-readable, so
+/// the per-user directory is what keeps other accounts on that host from
+/// reading whatever you drop.
+///
+/// To override, give either an absolute path or one starting with `~/` to
+/// place it relative to the remote user's home directory. The directory is
+/// created if it does not exist.
+///
+/// The value may not contain quotes, backticks, `$`, or backslashes, since
+/// it is interpolated into a remote shell command.
+@"ssh-drop-upload-dir": ?[]const u8 = null,
+
 /// macOS doesn't have a distinct "alt" key and instead has the "option"
 /// key which behaves slightly differently. On macOS by default, the
 /// option key plus a character will sometimes produce a Unicode character.

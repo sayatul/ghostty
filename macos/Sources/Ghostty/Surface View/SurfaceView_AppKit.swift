@@ -1835,6 +1835,8 @@ extension Ghostty {
             let windowTitleFontFamily: String?
             let windowAppearance: NSAppearance?
             let scrollbar: Ghostty.Config.Scrollbar
+            let sshDropUpload: Bool
+            let sshDropUploadDir: String
 
             init() {
                 self.backgroundColor = Color(NSColor.windowBackgroundColor)
@@ -1844,6 +1846,8 @@ extension Ghostty {
                 self.windowTitleFontFamily = nil
                 self.windowAppearance = nil
                 self.scrollbar = .system
+                self.sshDropUpload = false
+                self.sshDropUploadDir = ""
             }
 
             init(_ config: Ghostty.Config) {
@@ -1854,6 +1858,8 @@ extension Ghostty {
                 self.windowTitleFontFamily = config.windowTitleFontFamily
                 self.windowAppearance = .init(ghosttyConfig: config)
                 self.scrollbar = config.scrollbar
+                self.sshDropUpload = config.sshDropUpload
+                self.sshDropUploadDir = config.sshDropUploadDir
             }
         }
 
@@ -2296,6 +2302,15 @@ extension Ghostty.SurfaceView {
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
         let pb = sender.draggingPasteboard
 
+        // If we're sitting in an SSH session and uploading is enabled, the
+        // local path names nothing on the remote. Ship the files up and insert
+        // where they landed instead. This returns early because the upload has
+        // to happen off the main queue.
+        if let urls = pb.readObjects(forClasses: [NSURL.self]) as? [URL] {
+            let files = urls.filter(\.isFileURL)
+            if !files.isEmpty, uploadDroppedFilesOverSSH(files) { return true }
+        }
+
         let content = pb.getOpinionatedStringContents()
 
         if let content {
@@ -2306,6 +2321,36 @@ extension Ghostty.SurfaceView {
         }
 
         return false
+    }
+
+    /// Upload dropped files to the host this surface is ssh'd into, then insert
+    /// the remote paths. Returns false if that doesn't apply, leaving the
+    /// caller to insert the local paths as usual.
+    private func uploadDroppedFilesOverSSH(_ urls: [URL]) -> Bool {
+        guard derivedConfig.sshDropUpload else { return false }
+        guard let surface = self.surface else { return false }
+
+        // The foreground process of the pty is the ssh client itself in the
+        // common case, and the root of the search otherwise.
+        let pid = pid_t(truncatingIfNeeded: ghostty_surface_foreground_pid(surface))
+        guard pid > 0, let destination = SSHDropUpload.find(under: pid) else { return false }
+
+        let directory = derivedConfig.sshDropUploadDir
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let remotePaths = SSHDropUpload.upload(urls, to: destination, directory: directory)
+
+            // On failure fall back to the local paths rather than swallowing
+            // the drop, so the file is never silently lost.
+            let content = (remotePaths ?? urls.map(\.path))
+                .map { Ghostty.Shell.escape($0) }
+                .joined(separator: " ")
+
+            DispatchQueue.main.async {
+                self?.surfaceModel?.sendText(content)
+            }
+        }
+
+        return true
     }
 }
 
