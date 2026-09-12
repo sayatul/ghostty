@@ -152,6 +152,26 @@ extension Ghostty {
             return Float(v)
         }
 
+        var sshDropUpload: Bool {
+            guard let config = self.config else { return false }
+            var v = false
+            let key = "ssh-drop-upload"
+            _ = ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8)))
+            return v
+        }
+
+        /// Empty means unset: upload into the remote's temporary directory.
+        var sshDropUploadDir: String {
+            let defaultValue = ""
+            guard let config = self.config else { return defaultValue }
+            var v: UnsafePointer<Int8>?
+            let key = "ssh-drop-upload-dir"
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8)))
+            else { return defaultValue }
+            guard let ptr = v else { return defaultValue }
+            return String(cString: ptr)
+        }
+
         var notifyOnCommandFinish: NotifyOnCommandFinish {
             guard let config = self.config else { return .never }
             var v: UnsafePointer<Int8>?
